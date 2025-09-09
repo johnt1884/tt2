@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Horizontal Fade Bars</title>
+  <style>
+    body {
+      margin: 20px;
+      background: #fff;
+      font-family: Arial, sans-serif;
+    }
+
+    h2 {
+      margin-top: 40px;
+    }
+
+    .bar {
+      height: 10px;
+      margin: 20px 0;
+    }
+
+    /* 1. Basic Linear Gradient */
+    .bar-gradient {
+      background: linear-gradient(to right, #FFD1A4, rgba(255, 209, 164, 0));
+    }
+
+    /* 2. Using opacity and pseudo-elements (only first part visible) */
+    .bar-opacity {
+      position: relative;
+      background: #FFD1A4;
+      overflow: hidden;
+    }
+    .bar-opacity::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(to right, rgba(255, 255, 255, 0), white);
+      mix-blend-mode: multiply;
+    }
+
+    /* 3. With mask-image (modern browsers only) */
+    .bar-mask {
+      background-color: #FFD1A4;
+      -webkit-mask-image: linear-gradient(to right, black, transparent);
+      mask-image: linear-gradient(to right, black, transparent);
+    }
+
+    /* 4. With SVG embedded */
+    .bar-svg {
+      background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="10"><defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="%23FFD1A4"/><stop offset="100%" stop-color="%23FFD1A4" stop-opacity="0"/></linearGradient></defs><rect width="100%" height="10" fill="url(%23grad)" /></svg>') no-repeat;
+      background-size: 100% 100%;
+    }
+
+    /* 5. CSS Animation Fading Out (for fun) */
+    @keyframes fade-out {
+      0% { background: #FFD1A4; }
+      100% { background: rgba(255, 209, 164, 0); }
+    }
+
+    .bar-animated {
+      background: linear-gradient(to right, #FFD1A4, rgba(255, 209, 164, 0));
+      animation: fade-out 2s ease-in-out infinite alternate;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Horizontal Fade Bars Examples</h1>
+
+  <h2>1. Linear Gradient</h2>
+  <div class="bar bar-gradient"></div>
+
+  <h2>2. Opacity Layer with Pseudo-element</h2>
+  <div class="bar bar-opacity"></div>
+
+  <h2>3. CSS Mask Image (modern browsers only)</h2>
+  <div class="bar bar-mask"></div>
+
+  <h2>4. SVG Gradient Background</h2>
+  <div class="bar bar-svg"></div>
+
+  <h2>5. Animated Fade (CSS Animation)</h2>
+  <div class="bar bar-animated"></div>
+
+</body>
+</html>
