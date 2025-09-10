@@ -3422,7 +3422,8 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
 
     const shouldDisableUnderline = !isTopLevelMessage;
 
-        const shouldDisplayFilenames = true;
+        const showFilenameKey = isEvenDepth ? 'showOddMessageFilename' : 'showEvenMessageFilename';
+        const shouldDisplayFilenames = allThemeSettings[showFilenameKey] === true; // Defaults to false if not set
 
         // --- Define all media patterns once at the top of the function ---
         const youtubePatterns = [
@@ -8313,6 +8314,7 @@ function applyThemeSettings(options = {}) {
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Content Font:", storageKey: 'msgDepthOddTextColor', cssVariable: '--otk-msg-depth-odd-text-color', defaultValue: '#333333', inputType: 'color', idSuffix: 'msg-depth-odd-text', requiresRerender: true }));
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Header Font:", storageKey: 'msgDepthOddHeaderTextColor', cssVariable: '--otk-msg-depth-odd-header-text-color', defaultValue: '#555555', inputType: 'color', idSuffix: 'msg-depth-odd-header-text', requiresRerender: true }));
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Header Underline:", storageKey: 'viewerHeaderBorderColorOdd', cssVariable: '--otk-viewer-header-border-color-odd', defaultValue: '#000000', inputType: 'color', idSuffix: 'viewer-header-border-odd', requiresRerender: true }));
+        themeOptionsContainer.appendChild(createCheckboxOptionRow({ labelText: "Show Media Filename:", storageKey: 'showOddMessageFilename', defaultValue: false, idSuffix: 'show-odd-filename', requiresRerender: true }));
 
         // --- Messages (Evens) Section ---
         const evenMessagesHeading = createSectionHeading('Messages (Evens)');
@@ -8323,6 +8325,7 @@ function applyThemeSettings(options = {}) {
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Background:", storageKey: 'msgDepthEvenBgColor', cssVariable: '--otk-msg-depth-even-bg-color', defaultValue: '#d9d9d9', inputType: 'color', idSuffix: 'msg-depth-even-bg', requiresRerender: true }));
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Content Font:", storageKey: 'msgDepthEvenTextColor', cssVariable: '--otk-msg-depth-even-text-color', defaultValue: '#333333', inputType: 'color', idSuffix: 'msg-depth-even-text', requiresRerender: true }));
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Header Font:", storageKey: 'msgDepthEvenHeaderTextColor', cssVariable: '--otk-msg-depth-even-header-text-color', defaultValue: '#555555', inputType: 'color', idSuffix: 'msg-depth-even-header-text', requiresRerender: true }));
+        themeOptionsContainer.appendChild(createCheckboxOptionRow({ labelText: "Show Media Filename:", storageKey: 'showEvenMessageFilename', defaultValue: false, idSuffix: 'show-even-filename', requiresRerender: true }));
 
         // --- Options Panel Section ---
         const optionsPanelSectionHeading = createSectionHeading('Options Panel');
@@ -8721,7 +8724,9 @@ function applyThemeSettings(options = {}) {
 
             const newBooleanSettings = [
                 { key: 'otkMsgDepthOddDisableHeaderUnderline', defaultValue: false, idSuffix: 'msg-depth-odd-disable-header-underline' },
-                { key: 'otkMsgDepthEvenDisableHeaderUnderline', defaultValue: true, idSuffix: 'msg-depth-even-disable-header-underline' }
+                { key: 'otkMsgDepthEvenDisableHeaderUnderline', defaultValue: true, idSuffix: 'msg-depth-even-disable-header-underline' },
+                { key: 'showOddMessageFilename', defaultValue: false, idSuffix: 'show-odd-filename'},
+                { key: 'showEvenMessageFilename', defaultValue: false, idSuffix: 'show-even-filename'}
             ];
             newBooleanSettings.forEach(opt => {
                 const checkbox = document.getElementById(`otk-${opt.idSuffix}-checkbox`);
