@@ -865,7 +865,7 @@ function createTweetEmbedElement(tweetId) {
             color: var(--otk-gui-text-color); /* This is now for general GUI text */
             font-family: Verdana, sans-serif;
             font-size: 14px;
-            padding: 5px 25px;
+            padding: 5px 28px;
             box-sizing: border-box;
             display: flex;
             align-items: stretch;
@@ -1055,7 +1055,7 @@ function createTweetEmbedElement(tweetId) {
                 color: var(--otk-gui-text-color); /* This is now for general GUI text */
                 font-family: Verdana, sans-serif;
                 font-size: 14px;
-                padding: 5px 25px;
+                padding: 5px 28px;
                 box-sizing: border-box;
                 display: flex;
                 align-items: stretch;
