@@ -167,6 +167,7 @@ document.addEventListener("visibilitychange", () => {
     let blurredImages = new Set();
     let blockedThreads = new Set();
     let cachedNewMessages = [];
+    let multiQuoteSelections = new Set();
 
     // IndexedDB instance
     let otkMediaDB = null;
@@ -1496,6 +1497,148 @@ function animateStatIncrease(statEl, plusNEl, from, to) {
         consoleLog(`Toggled blur for ${filehash}. Now blurred: ${isBlurred}`);
     }
 
+function triggerQuickReply(postId, threadId) {
+    const selections = Array.from(multiQuoteSelections);
+    let textToQuote = '';
+
+    // A "single quote" action is defined as clicking a reply link when no multi-quote checkboxes are ticked.
+    const isSingleQuoteAction = postId !== null && selections.length === 0;
+
+    if (isSingleQuoteAction) {
+        const message = findMessageById(postId);
+        if (message && message.com) {
+            // New, more robust parsing using raw .com to distinguish quotes from greentext
+            let cleanedText = message.com
+                .replace(/<br\s*\/?>/gi, '\n')
+                // For quotes, remove the span but also the leading '>'.
+                .replace(/<span class="quote">&gt;(.*?)<\/span>/gi, '$1')
+                // For greentext, just remove the span tags, leaving the '>'.
+                .replace(/<span class="greentext">&gt;(.*?)<\/span>/gi, '>$1')
+                // Remove quotelinks like >>12345 or >>12345 (You)
+                .replace(/<a[^>]+class="quotelink"[^>]*>&gt;&gt;\d+.*?<\/a>/gi, '')
+                // 4chan sometimes adds <wbr> tags for word breaks
+                .replace(/<wbr>/gi, '')
+                // Strip any other remaining HTML tags
+                .replace(/<[^>]+>/g, '');
+            textToQuote = decodeAllHtmlEntities(cleanedText).trim();
+        } else if (message) {
+            // Fallback for old messages without .com stored.
+            // This is buggy for greentext, but better than the original bug.
+            textToQuote = (message.text || '')
+                .split('\n')
+                .map(line => line.replace(/^>\s*/, ''))
+                .join('\n');
+        }
+    }
+
+    consoleLog(`[OTK Injector] Creating script to trigger reply for post ID: ${postId}, Thread: ${threadId}, Multi-Quote Selections:`, selections);
+
+    try {
+        const script = document.createElement('script');
+        script.id = 'otk-qr-injector-script';
+        script.textContent = `
+            (function() {
+                try {
+                    const postId = ${postId};
+                    const threadId = ${threadId};
+                    const selections = ${JSON.stringify(selections)};
+                    const textToQuote = ${JSON.stringify(textToQuote)}; // Pass the text for single quotes
+                    let quotesToApply = new Set(selections);
+
+                    if (postId !== null) {
+                        quotesToApply.add(postId);
+                    }
+
+                    console.log('[Injected Script] Executing for post: ' + postId + ' in thread ' + threadId);
+                    console.log('[Injected Script] Quotes to apply:', Array.from(quotesToApply));
+                    if (textToQuote) {
+                        console.log('[Injected Script] Text to quote provided for single quote action.');
+                    }
+
+                    if (window.QR && typeof window.QR.show === 'function') {
+                        window.QR.show(threadId);
+                        console.log('[Injected Script] window.QR.show(' + threadId + ') called.');
+                    } else {
+                        console.error('[Injected Script] window.QR.show is not a function.');
+                        return;
+                    }
+
+                    setTimeout(() => {
+                        console.log('[Injected Script] Timeout executing...');
+                        const qrDiv = document.getElementById('quickReply');
+                        if (qrDiv) {
+                            console.log('[Injected Script] Found #quickReply div.');
+                            qrDiv.style.zIndex = '100001';
+                            console.log('[Injected Script] Set #quickReply z-index to 100001.');
+
+                            const textarea = qrDiv.querySelector('textarea[name="com"]');
+                            if (textarea) {
+                                let finalQuoteText = '';
+
+                                if (textToQuote) {
+                                    // This is a single quote action. The text is pre-cleaned.
+                                    // The only thing to do is remove pure quote-link lines.
+                                    const strippedText = textToQuote
+                                        .split('\\n')
+                                        .filter(line => !/^>>\\d+(\\s\\(You\\))?$/.test(line.trim()))
+                                        .join('\\n');
+
+                                    // Prepend '>' to every line of the cleaned text.
+                                    const quotedLines = strippedText
+                                        .split('\\n')
+                                        .map(line => '>' + line)
+                                        .join('\\n');
+
+                                    finalQuoteText = '>>' + postId + '\\n' + quotedLines + '\\n';
+                                    console.log('[Injected Script] Generated single post quote with pre-cleaned text.');
+
+                                } else if (quotesToApply.size > 0) {
+                                    // This is a multi-quote action or a single quote where text wasn't found/provided.
+                                    const sortedIds = Array.from(quotesToApply).sort((a, b) => a - b);
+                                    finalQuoteText = sortedIds.map(id => '>>' + id).join('\\n') + '\\n';
+                                    console.log('[Injected Script] Generated multi-quote or simple quote text.');
+                                }
+
+                                if (finalQuoteText) {
+                                    console.log('[Injected Script] Generated quote text:', finalQuoteText.replace(/\\n/g, '\\\\n'));
+                                    textarea.value = finalQuoteText + textarea.value;
+                                    console.log('[Injected Script] Manually prepended quotes. New value:', textarea.value);
+                                } else {
+                                    console.log('[Injected Script] No quotes to apply.');
+                                }
+                            } else {
+                                console.error('[Injected Script] Could not find QR textarea.');
+                            }
+                        } else {
+                            console.error('[Injected Script] Could not find #quickReply div after timeout.');
+                        }
+
+                        // Dispatch event to clear selections in the main script
+                        window.dispatchEvent(new CustomEvent('otkMultiQuoteApplied'));
+
+                    }, 100);
+
+                } catch (e) {
+                    console.error('[Injected Script] Error during execution:', e);
+                } finally {
+                    const self = document.getElementById('otk-qr-injector-script');
+                    if (self && self.parentNode) {
+                        self.parentNode.removeChild(self);
+                        console.log('[Injected Script] Self-removed from DOM.');
+                    }
+                }
+            })();
+        `;
+
+        document.body.appendChild(script);
+        consoleLog('[OTK Injector] Injected script into the DOM.');
+
+    } catch (e) {
+        consoleError('[OTK Injector] An unexpected error occurred in triggerQuickReply:', e);
+        alert(`An error occurred while trying to inject the reply script: ${e.message}`);
+    }
+}
+
     // --- Core Logic: Rendering, Fetching, Updating ---
 
     function findMessageById(messageId) {
@@ -1860,7 +2003,11 @@ function createThreadListItemElement(thread, isForTooltip = false) {
     crayonIcon.innerHTML = '🖍️';
     crayonIcon.style.cssText = `font-size: 12px; cursor: pointer; margin-left: 8px; visibility: hidden;`;
     crayonIcon.title = "Reply to this thread";
-    crayonIcon.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); const popup = window.open(thread.url, '_blank', 'width=460,height=425,resizable,scrollbars'); if (popup) { popup.addEventListener('load', () => { const script = popup.document.createElement('script'); script.textContent = `const replyLink = Array.from(document.querySelectorAll('a')).find(a => a.textContent.trim() === 'Post a Reply'); if (replyLink) replyLink.click();`; popup.document.body.appendChild(script); }, true); } });
+    crayonIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        triggerQuickReply(null, thread.id);
+    });
 
     const blockIcon = document.createElement('span');
     blockIcon.innerHTML = '&#x2715;';
@@ -3331,7 +3478,7 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
             if (shouldDisableUnderline) {
                 messageHeader.style.borderBottom = 'none';
                 messageHeader.style.paddingBottom = '0px';
-                messageHeader.style.marginBottom = '8px'; // Keep consistent margin even when underline is hidden
+                messageHeader.style.marginBottom = '4px'; // Reduced margin for quoted messages
                 messageHeader.style.lineHeight = '1.1';   // Standardized
                 messageHeader.style.minHeight = '0';      // Standardized
             }
@@ -3369,22 +3516,8 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                 }
                 idSpan.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const threadUrl = `https://boards.4chan.org/b/thread/${message.originalThreadId}`;
-                    const popup = window.open(threadUrl, '_blank', 'width=460,height=425,resizable,scrollbars');
-                    if (popup) {
-                        popup.addEventListener('load', () => {
-                            const script = popup.document.createElement('script');
-                            script.textContent = `
-                                const messageId = "${message.id}";
-                                const selector = \`#pi\${messageId} > span.postNum.desktop > a:nth-child(2)\`;
-                                const link = document.querySelector(selector);
-                                if (link) {
-                                    link.click();
-                                }
-                            `;
-                            popup.document.body.appendChild(script);
-                        }, true);
-                    }
+                    e.preventDefault();
+                    triggerQuickReply(message.id, message.originalThreadId);
                 });
 
                 const timeTextSpan = document.createElement('span');
@@ -3393,8 +3526,46 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                     timeTextSpan.style.textDecoration = 'line-through';
                 }
                 leftHeaderContent.appendChild(idSpan);
-
                 leftHeaderContent.appendChild(timeTextSpan);
+
+                // --- Multi-Quote Checkbox ---
+                const multiQuoteWrapper = document.createElement('div');
+                multiQuoteWrapper.className = 'otk-multiquote-checkbox-wrapper';
+                const multiQuoteCheckbox = document.createElement('input');
+                multiQuoteCheckbox.type = 'checkbox';
+                multiQuoteCheckbox.className = 'otk-multiquote-checkbox';
+                multiQuoteCheckbox.dataset.messageId = message.id;
+                multiQuoteCheckbox.checked = multiQuoteSelections.has(message.id);
+                if (multiQuoteCheckbox.checked) {
+                    multiQuoteWrapper.classList.add('selected');
+                }
+
+                multiQuoteCheckbox.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent anchoring when clicking checkbox
+                    if (e.target.checked) {
+                        multiQuoteSelections.add(message.id);
+                        multiQuoteWrapper.classList.add('selected');
+                    } else {
+                        multiQuoteSelections.delete(message.id);
+                        multiQuoteWrapper.classList.remove('selected');
+                    }
+                    consoleLog('Multi-quote selections:', multiQuoteSelections);
+                });
+
+                multiQuoteWrapper.appendChild(multiQuoteCheckbox);
+                leftHeaderContent.appendChild(multiQuoteWrapper);
+
+                leftHeaderContent.addEventListener('mouseenter', () => {
+                    if (!multiQuoteWrapper.classList.contains('selected')) {
+                        multiQuoteWrapper.classList.add('visible');
+                    }
+                });
+                leftHeaderContent.addEventListener('mouseleave', () => {
+                    if (!multiQuoteWrapper.classList.contains('selected')) {
+                        multiQuoteWrapper.classList.remove('visible');
+                    }
+                });
+                // --- End Multi-Quote ---
 
                 const blockIcon = document.createElement('span');
                 blockIcon.innerHTML = '&#128711;'; // Block icon
@@ -3582,24 +3753,49 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                 }
                 idSpan.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const threadUrl = `https://boards.4chan.org/b/thread/${message.originalThreadId}`;
-                    const popup = window.open(threadUrl, '_blank', 'width=460,height=425,resizable,scrollbars,popup=true');
-                    if (popup) {
-                        popup.addEventListener('load', () => {
-                            const script = popup.document.createElement('script');
-                            script.textContent = `
-                                const messageId = "${message.id}";
-                                const selector = \`#pi\${messageId} > span.postNum.desktop > a:nth-child(2)\`;
-                                const link = document.querySelector(selector);
-                                if (link) {
-                                    link.click();
-                                }
-                            `;
-                            popup.document.body.appendChild(script);
-                        }, true);
-                    }
+                    e.preventDefault();
+                    triggerQuickReply(message.id, message.originalThreadId);
                 });
                 headerContentWrapper.appendChild(idSpan);
+
+                // --- Multi-Quote Checkbox (for quoted messages) ---
+                const multiQuoteWrapper = document.createElement('div');
+                multiQuoteWrapper.className = 'otk-multiquote-checkbox-wrapper';
+                const multiQuoteCheckbox = document.createElement('input');
+                multiQuoteCheckbox.type = 'checkbox';
+                multiQuoteCheckbox.className = 'otk-multiquote-checkbox';
+                multiQuoteCheckbox.dataset.messageId = message.id;
+                multiQuoteCheckbox.checked = multiQuoteSelections.has(message.id);
+                if (multiQuoteCheckbox.checked) {
+                    multiQuoteWrapper.classList.add('selected');
+                }
+
+                multiQuoteCheckbox.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent anchoring when clicking checkbox
+                    if (e.target.checked) {
+                        multiQuoteSelections.add(message.id);
+                        multiQuoteWrapper.classList.add('selected');
+                    } else {
+                        multiQuoteSelections.delete(message.id);
+                        multiQuoteWrapper.classList.remove('selected');
+                    }
+                    consoleLog('Multi-quote selections:', multiQuoteSelections);
+                });
+
+                multiQuoteWrapper.appendChild(multiQuoteCheckbox);
+                headerContentWrapper.appendChild(multiQuoteWrapper);
+
+                headerContentWrapper.addEventListener('mouseenter', () => {
+                    if (!multiQuoteWrapper.classList.contains('selected')) {
+                        multiQuoteWrapper.classList.add('visible');
+                    }
+                });
+                headerContentWrapper.addEventListener('mouseleave', () => {
+                    if (!multiQuoteWrapper.classList.contains('selected')) {
+                        multiQuoteWrapper.classList.remove('visible');
+                    }
+                });
+                // --- End Multi-Quote ---
 
                 const blockIcon = document.createElement('span');
                 blockIcon.innerHTML = '&#128711;'; // Block icon
@@ -3944,7 +4140,8 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                     originalThreadId: threadId, // Store the original thread ID for color lookup
                     text: '', // Will be populated after decoding
                     title: opPost.sub ? toTitleCase(decodeEntities(opPost.sub)) : `Thread ${threadId}`, // Assuming decodeEntities here handles what it needs for title
-                    attachment: null
+                    attachment: null,
+                    com: post.com // Store the raw comment HTML for better quote parsing
                 };
 
                 if (post.com) {
@@ -6361,6 +6558,22 @@ function applyThemeSettings(options = {}) {
             document.documentElement.style.setProperty('--otk-pip-bg-color', settings.pipBackgroundColor);
             updateColorInputs('pip-bg', settings.pipBackgroundColor);
         }
+
+        // QR Theming
+        const qrColorConfigs = [
+            { key: 'qrBgColor', cssVar: '--otk-qr-bg-color', idSuffix: 'qr-bg' },
+            { key: 'qrBorderColor', cssVar: '--otk-qr-border-color', idSuffix: 'qr-border' },
+            { key: 'qrHeaderBgColor', cssVar: '--otk-qr-header-bg-color', idSuffix: 'qr-header-bg' },
+            { key: 'qrHeaderTextColor', cssVar: '--otk-qr-header-text-color', idSuffix: 'qr-header-text' },
+            { key: 'qrTextareaBgColor', cssVar: '--otk-qr-textarea-bg-color', idSuffix: 'qr-textarea-bg' },
+            { key: 'qrTextareaTextColor', cssVar: '--otk-qr-textarea-text-color', idSuffix: 'qr-textarea-text' },
+        ];
+        qrColorConfigs.forEach(config => {
+            if (settings[config.key]) {
+                document.documentElement.style.setProperty(config.cssVar, settings[config.key]);
+                updateColorInputs(config.idSuffix, settings[config.key]);
+            }
+        });
     }
 
 
@@ -8117,6 +8330,19 @@ function applyThemeSettings(options = {}) {
 
         // themeOptionsContainer.appendChild(createDivider()); // Removed divider
 
+        // --- Quick Reply Theming Section ---
+        const qrThemingHeading = createSectionHeading('Quick Reply Window');
+        qrThemingHeading.style.marginTop = "22px";
+        qrThemingHeading.style.marginBottom = "18px";
+        themeOptionsContainer.appendChild(qrThemingHeading);
+
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Background:", storageKey: 'qrBgColor', cssVariable: '--otk-qr-bg-color', defaultValue: '#333333', inputType: 'color', idSuffix: 'qr-bg' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Border:", storageKey: 'qrBorderColor', cssVariable: '--otk-qr-border-color', defaultValue: '#555555', inputType: 'color', idSuffix: 'qr-border' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Header Background:", storageKey: 'qrHeaderBgColor', cssVariable: '--otk-qr-header-bg-color', defaultValue: '#444444', inputType: 'color', idSuffix: 'qr-header-bg' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Header Text:", storageKey: 'qrHeaderTextColor', cssVariable: '--otk-qr-header-text-color', defaultValue: '#ffffff', inputType: 'color', idSuffix: 'qr-header-text' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Textarea Background:", storageKey: 'qrTextareaBgColor', cssVariable: '--otk-qr-textarea-bg-color', defaultValue: '#222222', inputType: 'color', idSuffix: 'qr-textarea-bg' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Textarea Text:", storageKey: 'qrTextareaTextColor', cssVariable: '--otk-qr-textarea-text-color', defaultValue: '#eeeeee', inputType: 'color', idSuffix: 'qr-textarea-text' }));
+
         // --- Messages Section Restructuring ---
         // --- Messages (Odds) Section ---
         const oddMessagesHeading = createSectionHeading('Messages (Odds)');
@@ -8496,7 +8722,15 @@ function applyThemeSettings(options = {}) {
                 { storageKey: 'clockBorderColor', cssVariable: '--otk-clock-border-color', defaultValue: '#181818', inputType: 'color', idSuffix: 'clock-border' },
                 { storageKey: 'clockSearchBgColor', cssVariable: '--otk-clock-search-bg-color', defaultValue: '#333', inputType: 'color', idSuffix: 'clock-search-bg' },
                 { storageKey: 'clockCogColor', cssVariable: '--otk-clock-cog-color', defaultValue: '#FFD700', inputType: 'color', idSuffix: 'clock-cog' },
-                { storageKey: 'clockSearchTextColor', cssVariable: '--otk-clock-search-text-color', defaultValue: '#e6e6e6', inputType: 'color', idSuffix: 'clock-search-text' }
+                { storageKey: 'clockSearchTextColor', cssVariable: '--otk-clock-search-text-color', defaultValue: '#e6e6e6', inputType: 'color', idSuffix: 'clock-search-text' },
+
+                // QR Theming
+                { storageKey: 'qrBgColor', cssVariable: '--otk-qr-bg-color', defaultValue: '#333333', inputType: 'color', idSuffix: 'qr-bg' },
+                { storageKey: 'qrBorderColor', cssVariable: '--otk-qr-border-color', defaultValue: '#555555', inputType: 'color', idSuffix: 'qr-border' },
+                { storageKey: 'qrHeaderBgColor', cssVariable: '--otk-qr-header-bg-color', defaultValue: '#444444', inputType: 'color', idSuffix: 'qr-header-bg' },
+                { storageKey: 'qrHeaderTextColor', cssVariable: '--otk-qr-header-text-color', defaultValue: '#ffffff', inputType: 'color', idSuffix: 'qr-header-text' },
+                { storageKey: 'qrTextareaBgColor', cssVariable: '--otk-qr-textarea-bg-color', defaultValue: '#222222', inputType: 'color', idSuffix: 'qr-textarea-bg' },
+                { storageKey: 'qrTextareaTextColor', cssVariable: '--otk-qr-textarea-text-color', defaultValue: '#eeeeee', inputType: 'color', idSuffix: 'qr-textarea-text' }
             ];
         }
 
@@ -8635,6 +8869,18 @@ function applyThemeSettings(options = {}) {
                 // localStorage.setItem('otkOptionsWindowPos', JSON.stringify({top: optionsWindow.style.top, left: optionsWindow.style.left}));
             }
         });
+
+window.addEventListener('otkMultiQuoteApplied', () => {
+    multiQuoteSelections.clear();
+    document.querySelectorAll('.otk-multiquote-checkbox-wrapper.selected').forEach(wrapper => {
+        wrapper.classList.remove('selected');
+        const checkbox = wrapper.querySelector('input');
+        if (checkbox) {
+            checkbox.checked = false;
+        }
+    });
+    consoleLog('Multi-quote selections have been cleared after being applied.');
+});
 
         consoleLog("Options Window setup complete with drag functionality.");
     }
@@ -9448,6 +9694,14 @@ function setupClockOptionsWindow() {
                 --otk-blur-icon-color: #000000;
                 --otk-blur-icon-bg-color: #d9d9d9;
                 --otk-blocked-content-font-color: #e6e6e6;
+
+                /* QR Theming */
+                --otk-qr-bg-color: #333333;
+                --otk-qr-border-color: #555555;
+                --otk-qr-header-bg-color: #444444;
+                --otk-qr-header-text-color: #ffffff;
+                --otk-qr-textarea-bg-color: #222222;
+                --otk-qr-textarea-text-color: #eeeeee;
             }
 
             /* Refined Chrome Scrollbar Styling for Overlay Effect */
@@ -9526,9 +9780,40 @@ function setupClockOptionsWindow() {
                 user-select: none;
                 -webkit-user-select: none; /* For Safari */
             }
+
+            /* Multi-Quote Checkbox Styling */
+            .otk-multiquote-checkbox-wrapper {
+                display: inline-block;
+                margin-left: 8px;
+                visibility: hidden; /* Hidden by default */
+            }
+            .otk-multiquote-checkbox-wrapper.visible,
+            .otk-multiquote-checkbox-wrapper.selected {
+                visibility: visible;
+            }
+            .otk-multiquote-checkbox {
+                vertical-align: middle;
+            }
+
+            /* Quick Reply Theming */
+            #quickReply {
+                background-color: var(--otk-qr-bg-color) !important;
+                border: 1px solid var(--otk-qr-border-color) !important;
+            }
+            #quickReply .move, #qrHeader, #quickReply > div:first-child { /* Header */
+                background-color: var(--otk-qr-header-bg-color) !important;
+                color: var(--otk-qr-header-text-color) !important;
+            }
+            #quickReply .move a, #qrHeader a, #quickReply > div:first-child a { /* Header links */
+                color: var(--otk-qr-header-text-color) !important;
+            }
+            #quickReply textarea[name="com"] {
+                background-color: var(--otk-qr-textarea-bg-color) !important;
+                color: var(--otk-qr-textarea-text-color) !important;
+            }
         `;
         document.head.appendChild(styleElement);
-        consoleLog("Injected CSS for anchored messages.");
+        consoleLog("Injected CSS for anchored messages and multi-quote.");
 
         await applyMainTheme();
         setupOptionsWindow(); // Call to create the options window shell and event listeners
