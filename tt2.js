@@ -1499,37 +1499,8 @@ function animateStatIncrease(statEl, plusNEl, from, to) {
 
 function triggerQuickReply(postId, threadId) {
     const selections = Array.from(multiQuoteSelections);
-    let textToQuote = '';
-
-    // A "single quote" action is defined as clicking a reply link when no multi-quote checkboxes are ticked.
-    const isSingleQuoteAction = postId !== null && selections.length === 0;
-
-    if (isSingleQuoteAction) {
-        const message = findMessageById(postId);
-        if (message && message.com) {
-            // New, more robust parsing using raw .com to distinguish quotes from greentext
-            let cleanedText = message.com
-                .replace(/<br\s*\/?>/gi, '\n')
-                // For quotes, remove the span but also the leading '>'.
-                .replace(/<span class="quote">&gt;(.*?)<\/span>/gi, '$1')
-                // For greentext, just remove the span tags, leaving the '>'.
-                .replace(/<span class="greentext">&gt;(.*?)<\/span>/gi, '>$1')
-                // Remove quotelinks like >>12345 or >>12345 (You)
-                .replace(/<a[^>]+class="quotelink"[^>]*>&gt;&gt;\d+.*?<\/a>/gi, '')
-                // 4chan sometimes adds <wbr> tags for word breaks
-                .replace(/<wbr>/gi, '')
-                // Strip any other remaining HTML tags
-                .replace(/<[^>]+>/g, '');
-            textToQuote = decodeAllHtmlEntities(cleanedText).trim();
-        } else if (message) {
-            // Fallback for old messages without .com stored.
-            // This is buggy for greentext, but better than the original bug.
-            textToQuote = (message.text || '')
-                .split('\n')
-                .map(line => line.replace(/^>\s*/, ''))
-                .join('\n');
-        }
-    }
+    // The textToQuote logic has been removed to fix the bug.
+    const textToQuote = ''; // Always empty now.
 
     consoleLog(`[OTK Injector] Creating script to trigger reply for post ID: ${postId}, Thread: ${threadId}, Multi-Quote Selections:`, selections);
 
@@ -1542,7 +1513,7 @@ function triggerQuickReply(postId, threadId) {
                     const postId = ${postId};
                     const threadId = ${threadId};
                     const selections = ${JSON.stringify(selections)};
-                    const textToQuote = ${JSON.stringify(textToQuote)}; // Pass the text for single quotes
+                    // textToQuote is no longer passed or used in the injected script.
                     let quotesToApply = new Set(selections);
 
                     if (postId !== null) {
@@ -1551,9 +1522,6 @@ function triggerQuickReply(postId, threadId) {
 
                     console.log('[Injected Script] Executing for post: ' + postId + ' in thread ' + threadId);
                     console.log('[Injected Script] Quotes to apply:', Array.from(quotesToApply));
-                    if (textToQuote) {
-                        console.log('[Injected Script] Text to quote provided for single quote action.');
-                    }
 
                     if (window.QR && typeof window.QR.show === 'function') {
                         window.QR.show(threadId);
@@ -1575,28 +1543,11 @@ function triggerQuickReply(postId, threadId) {
                             if (textarea) {
                                 let finalQuoteText = '';
 
-                                if (textToQuote) {
-                                    // This is a single quote action. The text is pre-cleaned.
-                                    // The only thing to do is remove pure quote-link lines.
-                                    const strippedText = textToQuote
-                                        .split('\\n')
-                                        .filter(line => !/^>>\\d+(\\s\\(You\\))?$/.test(line.trim()))
-                                        .join('\\n');
-
-                                    // Prepend '>' to every line of the cleaned text.
-                                    const quotedLines = strippedText
-                                        .split('\\n')
-                                        .map(line => '>' + line)
-                                        .join('\\n');
-
-                                    finalQuoteText = '>>' + postId + '\\n' + quotedLines + '\\n';
-                                    console.log('[Injected Script] Generated single post quote with pre-cleaned text.');
-
-                                } else if (quotesToApply.size > 0) {
-                                    // This is a multi-quote action or a single quote where text wasn't found/provided.
+                                if (quotesToApply.size > 0) {
+                                    // This is now the only logic path for generating quote text.
                                     const sortedIds = Array.from(quotesToApply).sort((a, b) => a - b);
                                     finalQuoteText = sortedIds.map(id => '>>' + id).join('\\n') + '\\n';
-                                    console.log('[Injected Script] Generated multi-quote or simple quote text.');
+                                    console.log('[Injected Script] Generated simple quote text.');
                                 }
 
                                 if (finalQuoteText) {
@@ -3209,7 +3160,8 @@ function _populateMessageBody(message, mediaLoadPromises, uniqueImageViewerHashe
                         const matchedText = earliestMatch[0];
                         if (earliestMatchIsQuoteLink) {
                             if (currentDepth >= MAX_QUOTE_DEPTH) {
-                                textElement.appendChild(document.createTextNode(matchedText));
+                                const newText = matchedText.replace(/>>(\d+)/, '↪ $1');
+                                textElement.appendChild(document.createTextNode(newText));
                             } else {
                                 const quotedMessageId = earliestMatch[1];
                                 let quotedMessageObject = null;
@@ -3229,7 +3181,7 @@ function _populateMessageBody(message, mediaLoadPromises, uniqueImageViewerHashe
                                     }
                                 } else {
                                     const notFoundSpan = document.createElement('span');
-                                    notFoundSpan.textContent = `>>${quotedMessageId} (Not Found)`;
+                                    notFoundSpan.textContent = `↪ ${quotedMessageId} (Not Found)`;
                                     notFoundSpan.style.color = '#88ccee';
                                     notFoundSpan.style.textDecoration = 'underline';
                                     textElement.appendChild(notFoundSpan);
@@ -3746,7 +3698,7 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                 headerContentWrapper.style.alignItems = 'center';
 
                 const idSpan = document.createElement('span');
-                idSpan.textContent = ` >>${message.id}`; // Changed prefix for quoted messages
+                idSpan.textContent = `#${message.id}`;
                 idSpan.style.cursor = 'pointer';
                 if (isFiltered) {
                     idSpan.style.textDecoration = 'line-through';
