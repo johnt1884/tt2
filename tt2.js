@@ -122,8 +122,8 @@ document.addEventListener("visibilitychange", () => {
     const LAST_SEEN_IMAGES_KEY = 'otkLastSeenImagesCount';
     const LAST_SEEN_VIDEOS_KEY = 'otkLastSeenVideosCount';
     const VIEWER_OPEN_KEY = 'otkViewerOpen'; // For viewer open/closed state
-    const ANCHORED_MESSAGE_ID_KEY = 'otkAnchoredMessageId'; // For storing anchored message ID
-    const ANCHORED_MESSAGE_CLASS = 'otk-anchored-message'; // CSS class for highlighting anchored message
+    const PINNED_MESSAGE_ID_KEY = 'otkPinnedMessageId'; // For storing pinned message ID
+    const PINNED_MESSAGE_CLASS = 'otk-pinned-message'; // CSS class for highlighting pinned message
     const MAX_QUOTE_DEPTH = 2; // Maximum depth for rendering nested quotes
     const SEEN_EMBED_URL_IDS_KEY = 'otkSeenEmbedUrlIds'; // For tracking unique text embeds for stats
     const OTK_TRACKED_KEYWORDS_KEY = 'otkTrackedKeywords'; // For user-defined keywords
@@ -2352,41 +2352,41 @@ consoleLog(`[StatsDebug] Unique image hashes for viewer: ${uniqueImageViewerHash
     consoleLog(`[StatsDebug] Viewer counts updated: Images=${viewerActiveImageCount}, Videos (top-level attached + top-level embed)=${viewerActiveVideoCount}`);
 updateDisplayedStatistics(false); // Update stats after all media processing is attempted.
 
-            let anchorScrolled = false;
-            const storedAnchoredInstanceId = localStorage.getItem(ANCHORED_MESSAGE_ID_KEY);
-            consoleLog("storedAnchoredInstanceId from localStorage:", storedAnchoredInstanceId);
+            let pinScrolled = false;
+            const storedPinnedInstanceId = localStorage.getItem(PINNED_MESSAGE_ID_KEY);
+            consoleLog("storedPinnedInstanceId from localStorage:", storedPinnedInstanceId);
 
             setTimeout(() => {
-                if (storedAnchoredInstanceId) {
-                    const anchoredElement = document.getElementById(storedAnchoredInstanceId);
-                    consoleLog("anchoredElement from getElementById:", anchoredElement);
+                if (storedPinnedInstanceId) {
+                    const pinnedElement = document.getElementById(storedPinnedInstanceId);
+                    consoleLog("pinnedElement from getElementById:", pinnedElement);
 
-                    if (anchoredElement && messagesContainer.contains(anchoredElement)) {
+                    if (pinnedElement && messagesContainer.contains(pinnedElement)) {
                         try {
-                            anchoredElement.scrollIntoView({ behavior: 'auto', block: 'center' });
-                            anchorScrolled = true;
-                            consoleLog(`Scrolled to anchored message instance: ${storedAnchoredInstanceId}`);
-                            if (!anchoredElement.classList.contains(ANCHORED_MESSAGE_CLASS)) {
-                                anchoredElement.classList.add(ANCHORED_MESSAGE_CLASS);
+                            pinnedElement.scrollIntoView({ behavior: 'auto', block: 'center' });
+                            pinScrolled = true;
+                            consoleLog(`Scrolled to pinned message instance: ${storedPinnedInstanceId}`);
+                            if (!pinnedElement.classList.contains(PINNED_MESSAGE_CLASS)) {
+                                pinnedElement.classList.add(PINNED_MESSAGE_CLASS);
                             }
                         } catch (e) {
-                            consoleError("Error scrolling to anchored message:", e);
+                            consoleError("Error scrolling to pinned message:", e);
                         }
                     } else {
-                        consoleWarn(`Anchored message instance ${storedAnchoredInstanceId} not found. Clearing anchor.`);
-                        localStorage.removeItem(ANCHORED_MESSAGE_ID_KEY);
+                        consoleWarn(`Pinned message instance ${storedPinnedInstanceId} not found. Clearing pin.`);
+                        localStorage.removeItem(PINNED_MESSAGE_ID_KEY);
                     }
                 }
             }, 500);
 
-            if (!anchorScrolled) {
+            if (!pinScrolled) {
                 if (isToggleOpen && lastViewerScrollTop > 0) {
                     messagesContainer.scrollTop = lastViewerScrollTop;
                     consoleLog(`Restored scroll position to: ${lastViewerScrollTop}`);
-                } else if (!storedAnchoredInstanceId) {
+                } else if (!storedPinnedInstanceId) {
                     setTimeout(() => {
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                        consoleLog(`No anchored message, scrolling to bottom.`);
+                        consoleLog(`No pinned message, scrolling to bottom.`);
                     }, 550);
                 }
             }
@@ -2992,7 +2992,7 @@ function wrapInCollapsibleContainer(elementsToWrap) {
     return container;
 }
 
-function _populateMessageBody(message, mediaLoadPromises, uniqueImageViewerHashes, boardForLink, isTopLevelMessage, currentDepth, threadColor, parentMessageId, ancestors, allThemeSettings, shouldDisplayFilenames, shouldDisableUnderline) {
+function _populateMessageBody(message, mediaLoadPromises, uniqueImageViewerHashes, boardForLink, isTopLevelMessage, currentDepth, threadColor, parentMessageId, ancestors, allThemeSettings, shouldDisplayFilenames, shouldDisableUnderline, effectiveDepthForStyling) {
     const textElement = document.createElement('div');
     textElement.style.whiteSpace = 'pre-wrap';
     textElement.style.overflowWrap = 'break-word';
@@ -3175,7 +3175,7 @@ function _populateMessageBody(message, mediaLoadPromises, uniqueImageViewerHashe
                                     }
                                 }
                                 if (quotedMessageObject) {
-                                    const quotedElement = createMessageElementDOM(quotedMessageObject, mediaLoadPromises, uniqueImageViewerHashes, quotedMessageObject.board || boardForLink, false, currentDepth + 1, null, message.id, ancestors);
+                                    const quotedElement = createMessageElementDOM(quotedMessageObject, mediaLoadPromises, uniqueImageViewerHashes, quotedMessageObject.board || boardForLink, false, currentDepth + 1, null, message.id, ancestors, effectiveDepthForStyling + 1);
                                     if (quotedElement) {
                                         textElement.appendChild(quotedElement);
                                     }
@@ -3261,7 +3261,121 @@ function _populateMessageBody(message, mediaLoadPromises, uniqueImageViewerHashe
     return [textElement, attachmentDiv];
 }
     // Signature now includes parentMessageId and ancestors
+function _createMessageHeaderIcons(message, messageDiv, isFiltered, headerContainer) {
+    const multiQuoteWrapper = document.createElement('div');
+    multiQuoteWrapper.className = 'otk-multiquote-checkbox-wrapper';
+    const multiQuoteCheckbox = document.createElement('input');
+    multiQuoteCheckbox.type = 'checkbox';
+    multiQuoteCheckbox.className = 'otk-multiquote-checkbox';
+    multiQuoteCheckbox.dataset.messageId = message.id;
+    multiQuoteCheckbox.checked = multiQuoteSelections.has(message.id);
+    if (multiQuoteCheckbox.checked) {
+        multiQuoteWrapper.classList.add('selected');
+    }
+
+    multiQuoteCheckbox.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.target.checked) {
+            multiQuoteSelections.add(message.id);
+            multiQuoteWrapper.classList.add('selected');
+        } else {
+            multiQuoteSelections.delete(message.id);
+            multiQuoteWrapper.classList.remove('selected');
+        }
+        consoleLog('Multi-quote selections:', multiQuoteSelections);
+    });
+
+    multiQuoteWrapper.appendChild(multiQuoteCheckbox);
+    headerContainer.appendChild(multiQuoteWrapper);
+
+    headerContainer.addEventListener('mouseenter', () => {
+        if (!multiQuoteWrapper.classList.contains('selected')) {
+            multiQuoteWrapper.classList.add('visible');
+        }
+    });
+    headerContainer.addEventListener('mouseleave', () => {
+        if (!multiQuoteWrapper.classList.contains('selected')) {
+            multiQuoteWrapper.classList.remove('visible');
+        }
+    });
+
+    const pinIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    pinIcon.setAttribute('class', 'otk-pin-icon');
+    pinIcon.setAttribute('title', 'Pin this message');
+    pinIcon.setAttribute('viewBox', '0 0 16 16');
+    const pinPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pinPath.setAttribute('d', 'M4.146.146A.5.5 0 0 1 4.5 0h7a.5.5 0 0 1 .5.5c0 .68-.342 1.174-.646 1.479-.126.125-.25.224-.354.298v4.431l.078.048c.203.127.476.314.751.555C12.36 7.775 13 8.527 13 9.5a.5.5 0 0 1-.5.5h-4v4.5c0 .276-.224 1.5-.5 1.5s-.5-1.224-.5-1.5V10h-4a.5.5 0 0 1-.5-.5c0-.973.64-1.725 1.17-2.189A6 6 0 0 1 5 6.708V2.277a3 3 0 0 1-.354-.298C4.342 1.674 4 1.179 4 .5a.5.5 0 0 1 .146-.354m1.58 1.408-.002-.001zm-.002-.001.002.001A.5.5 0 0 1 6 2v5a.5.5 0 0 1-.276.447h-.002l-.012.007-.054.03a5 5 0 0 0-.827.58c-.318.278-.585.596-.725.936h7.792c-.14-.34-.407-.658-.725-.936a5 5 0 0 0-.881-.61l-.012-.006h-.002A.5.5 0 0 1 10 7V2a.5.5 0 0 1 .295-.458 1.8 1.8 0 0 0 .351-.271c.08-.08.155-.17.214-.271H5.14q.091.15.214.271a1.8 1.8 0 0 0 .37.282');
+    pinPath.setAttribute('fill', 'currentColor');
+    pinIcon.appendChild(pinPath);
+    headerContainer.appendChild(pinIcon);
+
+    const blockIcon = document.createElement('span');
+    blockIcon.classList.add('block-icon');
+    blockIcon.innerHTML = '&#128711;';
+    blockIcon.style.cssText = 'margin-left: 8px; cursor: pointer; font-size: 16px;';
+
+    if (isFiltered) {
+        blockIcon.style.color = 'red';
+        blockIcon.title = 'This message is blocked by your filters.';
+    } else {
+        blockIcon.style.visibility = 'hidden';
+        blockIcon.title = 'Create filter for this message';
+        headerContainer.addEventListener('mouseenter', () => {
+            blockIcon.style.visibility = 'visible';
+            if (pinIcon) pinIcon.style.visibility = 'visible';
+        });
+        headerContainer.addEventListener('mouseleave', () => {
+            blockIcon.style.visibility = 'hidden';
+            if (pinIcon && !messageDiv.classList.contains(PINNED_MESSAGE_CLASS)) {
+                pinIcon.style.visibility = 'hidden';
+            }
+        });
+    }
+    headerContainer.appendChild(blockIcon);
+
+    blockIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const hasText = message.text && message.text.replace(/>>\d+(\s\(You\))?/g, '').trim().length > 0;
+        const hasAttachment = message.attachment && message.attachment.filehash_db_key;
+        const newRule = {
+            id: Date.now(),
+            action: 'filterOut',
+            enabled: true,
+            category: 'keyword',
+            matchContent: '',
+            replaceContent: ''
+        };
+        if (hasText && hasAttachment) {
+            newRule.category = 'entireMessage';
+            try {
+                newRule.matchContent = JSON.stringify({
+                    text: message.text.replace(/>>\d+(\s\(You\))?/g, '').trim(),
+                    media: `md5:${message.attachment.filehash_db_key}`
+                }, null, 2);
+            } catch (err) {
+                consoleError("Failed to stringify composite filter", err);
+                newRule.category = 'attachedMedia';
+                newRule.matchContent = `md5:${message.attachment.filehash_db_key}`;
+            }
+        } else if (hasText) {
+            newRule.category = 'keyword';
+            newRule.matchContent = message.text.replace(/>>\d+(\s\(You\))?/g, '').trim();
+        } else if (hasAttachment) {
+            newRule.category = 'attachedMedia';
+            newRule.matchContent = `md5:${message.attachment.filehash_db_key}`;
+        }
+        const filterWindow = document.getElementById('otk-filter-window');
+        if (filterWindow) {
+            filterWindow.style.display = 'flex';
+            renderFilterEditorView(newRule);
+        }
+    });
+
+    return pinIcon;
+}
+
 function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHashes, boardForLink, isTopLevelMessage, currentDepth, threadColor, parentMessageId = null, ancestors = new Set(), visualDepth = null) {
+        let pinIcon;
         const filterRules = JSON.parse(localStorage.getItem(FILTER_RULES_V2_KEY) || '[]');
 
         const shouldBeFilteredOut = isMessageFiltered(message, filterRules);
@@ -3374,6 +3488,7 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
             if (isTopLevelMessage) {
                 messageDiv.classList.add('otk-message-container-main');
             }
+            messageDiv.classList.add(isEvenDepth ? 'otk-message-depth-odd' : 'otk-message-depth-even');
 
             let marginLeft = '0';
             let paddingLeft = '10px'; // Default to 10px
@@ -3480,106 +3595,7 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                 leftHeaderContent.appendChild(idSpan);
                 leftHeaderContent.appendChild(timeTextSpan);
 
-                // --- Multi-Quote Checkbox ---
-                const multiQuoteWrapper = document.createElement('div');
-                multiQuoteWrapper.className = 'otk-multiquote-checkbox-wrapper';
-                const multiQuoteCheckbox = document.createElement('input');
-                multiQuoteCheckbox.type = 'checkbox';
-                multiQuoteCheckbox.className = 'otk-multiquote-checkbox';
-                multiQuoteCheckbox.dataset.messageId = message.id;
-                multiQuoteCheckbox.checked = multiQuoteSelections.has(message.id);
-                if (multiQuoteCheckbox.checked) {
-                    multiQuoteWrapper.classList.add('selected');
-                }
-
-                multiQuoteCheckbox.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent anchoring when clicking checkbox
-                    if (e.target.checked) {
-                        multiQuoteSelections.add(message.id);
-                        multiQuoteWrapper.classList.add('selected');
-                    } else {
-                        multiQuoteSelections.delete(message.id);
-                        multiQuoteWrapper.classList.remove('selected');
-                    }
-                    consoleLog('Multi-quote selections:', multiQuoteSelections);
-                });
-
-                multiQuoteWrapper.appendChild(multiQuoteCheckbox);
-                leftHeaderContent.appendChild(multiQuoteWrapper);
-
-                leftHeaderContent.addEventListener('mouseenter', () => {
-                    if (!multiQuoteWrapper.classList.contains('selected')) {
-                        multiQuoteWrapper.classList.add('visible');
-                    }
-                });
-                leftHeaderContent.addEventListener('mouseleave', () => {
-                    if (!multiQuoteWrapper.classList.contains('selected')) {
-                        multiQuoteWrapper.classList.remove('visible');
-                    }
-                });
-                // --- End Multi-Quote ---
-
-                const blockIcon = document.createElement('span');
-                blockIcon.innerHTML = '&#128711;'; // Block icon
-                blockIcon.style.cssText = 'margin-left: 10px; cursor: pointer;';
-
-                if (isFiltered) {
-                    blockIcon.style.color = 'red';
-                    blockIcon.title = 'This message is blocked by your filters.';
-                } else {
-                    blockIcon.style.visibility = 'hidden';
-                    blockIcon.title = 'Create filter for this message';
-                leftHeaderContent.addEventListener('mouseenter', () => {
-                        blockIcon.style.visibility = 'visible';
-                    });
-                leftHeaderContent.addEventListener('mouseleave', () => {
-                        blockIcon.style.visibility = 'hidden';
-                    });
-                }
-                leftHeaderContent.appendChild(blockIcon);
-
-                blockIcon.addEventListener('click', (e) => {
-                    e.stopPropagation();
-
-                    const hasText = message.text && message.text.replace(/>>\d+(\s\(You\))?/g, '').trim().length > 0;
-                    const hasAttachment = message.attachment && message.attachment.filehash_db_key;
-
-                    const newRule = {
-                        id: Date.now(),
-                        action: 'filterOut',
-                        enabled: true,
-                        category: 'keyword', // default
-                        matchContent: '',
-                        replaceContent: ''
-                    };
-
-                    if (hasText && hasAttachment) {
-                        newRule.category = 'entireMessage';
-                        try {
-                            newRule.matchContent = JSON.stringify({
-                                text: message.text.replace(/>>\d+(\s\(You\))?/g, '').trim(),
-                                media: `md5:${message.attachment.filehash_db_key}`
-                            }, null, 2);
-                        } catch (err) {
-                            consoleError("Failed to stringify composite filter", err);
-                            // Fallback to simpler filter if stringify fails
-                            newRule.category = 'attachedMedia';
-                            newRule.matchContent = `md5:${message.attachment.filehash_db_key}`;
-                        }
-                    } else if (hasText) {
-                        newRule.category = 'keyword';
-                        newRule.matchContent = message.text.replace(/>>\d+(\s\(You\))?/g, '').trim();
-                    } else if (hasAttachment) {
-                        newRule.category = 'attachedMedia';
-                        newRule.matchContent = `md5:${message.attachment.filehash_db_key}`;
-                    }
-
-                    const filterWindow = document.getElementById('otk-filter-window');
-                    if (filterWindow) {
-                        filterWindow.style.display = 'flex';
-                        renderFilterEditorView(newRule);
-                    }
-                });
+                pinIcon = _createMessageHeaderIcons(message, messageDiv, isFiltered, leftHeaderContent);
 
                 const dateSpan = document.createElement('span');
                 dateSpan.textContent = timestampParts.date;
@@ -3710,172 +3726,49 @@ function createMessageElementDOM(message, mediaLoadPromises, uniqueImageViewerHa
                 });
                 headerContentWrapper.appendChild(idSpan);
 
-                // --- Multi-Quote Checkbox (for quoted messages) ---
-                const multiQuoteWrapper = document.createElement('div');
-                multiQuoteWrapper.className = 'otk-multiquote-checkbox-wrapper';
-                const multiQuoteCheckbox = document.createElement('input');
-                multiQuoteCheckbox.type = 'checkbox';
-                multiQuoteCheckbox.className = 'otk-multiquote-checkbox';
-                multiQuoteCheckbox.dataset.messageId = message.id;
-                multiQuoteCheckbox.checked = multiQuoteSelections.has(message.id);
-                if (multiQuoteCheckbox.checked) {
-                    multiQuoteWrapper.classList.add('selected');
-                }
-
-                multiQuoteCheckbox.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent anchoring when clicking checkbox
-                    if (e.target.checked) {
-                        multiQuoteSelections.add(message.id);
-                        multiQuoteWrapper.classList.add('selected');
-                    } else {
-                        multiQuoteSelections.delete(message.id);
-                        multiQuoteWrapper.classList.remove('selected');
-                    }
-                    consoleLog('Multi-quote selections:', multiQuoteSelections);
-                });
-
-                multiQuoteWrapper.appendChild(multiQuoteCheckbox);
-                headerContentWrapper.appendChild(multiQuoteWrapper);
-
-                headerContentWrapper.addEventListener('mouseenter', () => {
-                    if (!multiQuoteWrapper.classList.contains('selected')) {
-                        multiQuoteWrapper.classList.add('visible');
-                    }
-                });
-                headerContentWrapper.addEventListener('mouseleave', () => {
-                    if (!multiQuoteWrapper.classList.contains('selected')) {
-                        multiQuoteWrapper.classList.remove('visible');
-                    }
-                });
-                // --- End Multi-Quote ---
-
-                const blockIcon = document.createElement('span');
-                blockIcon.innerHTML = '&#128711;'; // Block icon
-                blockIcon.style.cssText = 'margin-left: 10px; cursor: pointer;';
-
-                if (isFiltered) {
-                    blockIcon.style.color = 'red';
-                    blockIcon.title = 'This message is blocked by your filters.';
-                } else {
-                    blockIcon.style.visibility = 'hidden';
-                    blockIcon.title = 'Create filter for this message';
-                    headerContentWrapper.addEventListener('mouseenter', () => {
-                        blockIcon.style.visibility = 'visible';
-                    });
-                    headerContentWrapper.addEventListener('mouseleave', () => {
-                        blockIcon.style.visibility = 'hidden';
-                    });
-                }
-                headerContentWrapper.appendChild(blockIcon);
+                pinIcon = _createMessageHeaderIcons(message, messageDiv, isFiltered, headerContentWrapper);
                 messageHeader.appendChild(headerContentWrapper);
-
-                blockIcon.addEventListener('click', (e) => {
-                    e.stopPropagation();
-
-                    const hasText = message.text && message.text.replace(/>>\d+(\s\(You\))?/g, '').trim().length > 0;
-                    const hasAttachment = message.attachment && message.attachment.filehash_db_key;
-
-                    const newRule = {
-                        id: Date.now(),
-                        action: 'filterOut',
-                        enabled: true,
-                        category: 'keyword', // default
-                        matchContent: '',
-                        replaceContent: ''
-                    };
-
-                    if (hasText && hasAttachment) {
-                        newRule.category = 'entireMessage';
-                         try {
-                            newRule.matchContent = JSON.stringify({
-                                text: message.text.replace(/>>\d+(\s\(You\))?/g, '').trim(),
-                                media: `md5:${message.attachment.filehash_db_key}`
-                            }, null, 2);
-                        } catch (err) {
-                            consoleError("Failed to stringify composite filter", err);
-                            // Fallback to simpler filter if stringify fails
-                            newRule.category = 'attachedMedia';
-                            newRule.matchContent = `md5:${message.attachment.filehash_db_key}`;
-                        }
-                    } else if (hasText) {
-                        newRule.category = 'keyword';
-                        newRule.matchContent = message.text.replace(/>>\d+(\s\(You\))?/g, '').trim();
-                    } else if (hasAttachment) {
-                        newRule.category = 'attachedMedia';
-                        newRule.matchContent = `md5:${message.attachment.filehash_db_key}`;
-                    }
-
-                    const filterWindow = document.getElementById('otk-filter-window');
-                    if (filterWindow) {
-                        filterWindow.style.display = 'flex';
-                        renderFilterEditorView(newRule);
-                    }
-                });
             }
             messageDiv.appendChild(messageHeader);
-            const [textElement, attachmentDiv] = _populateMessageBody(processedMessage, mediaLoadPromises, uniqueImageViewerHashes, boardForLink, isTopLevelMessage, currentDepth, threadColor, parentMessageId, newAncestors, allThemeSettings, shouldDisplayFilenames, shouldDisableUnderline);
+            const [textElement, attachmentDiv] = _populateMessageBody(processedMessage, mediaLoadPromises, uniqueImageViewerHashes, boardForLink, isTopLevelMessage, currentDepth, threadColor, parentMessageId, newAncestors, allThemeSettings, shouldDisplayFilenames, shouldDisableUnderline, effectiveDepthForStyling);
 
             // Click listener for anchoring
             const persistentInstanceId = `otk-msg-${parentMessageId || 'toplevel'}-${message.id}`;
             messageDiv.id = persistentInstanceId;
             messageDiv.setAttribute('data-original-message-id', message.id);
 
-            messageDiv.addEventListener('click', (event) => {
-                const target = event.target;
-                let preventAnchor = false;
-
-                // Standard interactive elements that should not trigger anchoring
-                if (target.matches('a, img, video, iframe, input, button, select, textarea') ||
-                    target.closest('a, img, video, iframe, input, button, select, textarea') ||
-                    target.isContentEditable) {
-                    preventAnchor = true;
-                }
-
-                // Specific wrapper classes for embeds that should not trigger anchoring
-                if (!preventAnchor) {
-                    const specificWrappers = [
-                        '.thumbnail-link',
-                        '.otk-youtube-embed-wrapper',
-                        '.otk-twitch-embed-wrapper',
-                        '.otk-streamable-embed-wrapper'
-                    ];
-                    if (specificWrappers.some(cls => target.matches(cls) || target.closest(cls))) {
-                        preventAnchor = true;
-                    }
-                }
-
-                if (preventAnchor) {
-                    return; // Do not anchor
-                }
-
-                if (!isTopLevelMessage) {
+            if (pinIcon) {
+                pinIcon.addEventListener('click', (event) => {
                     event.stopPropagation();
-                }
 
-                const isThisMessageAlreadyAnchored = messageDiv.classList.contains(ANCHORED_MESSAGE_CLASS);
+                    const isThisMessageAlreadyPinned = messageDiv.classList.contains(PINNED_MESSAGE_CLASS);
 
-                // Un-highlight all currently anchored messages
-                document.querySelectorAll(`.${ANCHORED_MESSAGE_CLASS}`).forEach(el => {
-                    el.classList.remove(ANCHORED_MESSAGE_CLASS);
+                    // Un-highlight all currently pinned messages
+                    document.querySelectorAll(`.${PINNED_MESSAGE_CLASS}`).forEach(el => {
+                        el.classList.remove(PINNED_MESSAGE_CLASS);
+                    });
+
+                    if (isThisMessageAlreadyPinned) {
+                    // If the clicked message was the pin, un-pin it
+                    localStorage.removeItem(PINNED_MESSAGE_ID_KEY);
+                    consoleLog(`Un-pinned message instance: ${persistentInstanceId}`);
+                    } else {
+                    // Otherwise, pin this new message
+                        messageDiv.classList.add(PINNED_MESSAGE_CLASS);
+                    localStorage.setItem(PINNED_MESSAGE_ID_KEY, persistentInstanceId);
+                    consoleLog(`Pinned new message instance: ${persistentInstanceId}`);
+                    }
                 });
-
-                if (isThisMessageAlreadyAnchored) {
-                    // If the clicked message was the anchor, un-anchor it
-                    localStorage.removeItem(ANCHORED_MESSAGE_ID_KEY);
-                    consoleLog(`Un-anchored message instance: ${persistentInstanceId}`);
-                } else {
-                    // Otherwise, anchor this new message
-                    messageDiv.classList.add(ANCHORED_MESSAGE_CLASS);
-                    localStorage.setItem(ANCHORED_MESSAGE_ID_KEY, persistentInstanceId);
-                    consoleLog(`Anchored new message instance: ${persistentInstanceId}`);
-                }
-            });
+            }
 
             // Initial highlight check when the element is first created
-            const initiallyStoredAnchoredId = localStorage.getItem(ANCHORED_MESSAGE_ID_KEY);
-            consoleLog("initiallyStoredAnchoredId", initiallyStoredAnchoredId, "persistentInstanceId", persistentInstanceId);
-            if (persistentInstanceId === initiallyStoredAnchoredId) {
-                messageDiv.classList.add(ANCHORED_MESSAGE_CLASS);
+            const initiallyStoredPinnedId = localStorage.getItem(PINNED_MESSAGE_ID_KEY);
+            console.log("initiallyStoredPinnedId", initiallyStoredPinnedId, "persistentInstanceId", persistentInstanceId);
+            if (persistentInstanceId === initiallyStoredPinnedId) {
+                messageDiv.classList.add(PINNED_MESSAGE_CLASS);
+                if (pinIcon) {
+                    pinIcon.style.visibility = 'visible';
+                }
             }
 
             if (isFiltered) {
@@ -4977,17 +4870,17 @@ async function backgroundRefreshThreadsAndMessages(options = {}) { // Added opti
             // Explicitly re-render the viewer if it was open, using the fresh data.
             if (viewerWasOpen) {
                 consoleLog('[Clear] Re-rendering viewer with fresh data after clear.');
-                await renderMessagesInViewer({ isToggleOpen: false }); // isToggleOpen: false typically scrolls to bottom or default.
+            await renderMessagesInViewer({ isToggleOpen: false });
             }
-            // window.dispatchEvent(new CustomEvent('otkClearViewerDisplay')); // Removed as direct render is now handled.
             consoleLog('[Clear] Clear and Refresh data processing complete.');
+
+        renderThreadList(); // Update GUI bar with (now minimal) live threads
+        updateDisplayedStatistics(); // Update stats based on cleared and re-fetched data
         } catch (error) {
             consoleError('[Clear] Error during clear and refresh:', error);
         } finally {
             isManualRefreshInProgress = false;
             consoleLog('[Clear] Manual refresh flag reset.');
-            renderThreadList(); // Update GUI bar with (now minimal) live threads
-            updateDisplayedStatistics(); // Update stats based on cleared and re-fetched data
         }
     }
 
@@ -6340,14 +6233,14 @@ function applyThemeSettings(options = {}) {
             updateColorInputs('new-msg-font', settings.newMessagesFontColor);
         }
 
-        // Anchor Highlight Colors
-        if (settings.anchorHighlightBgColor) {
-            document.documentElement.style.setProperty('--otk-anchor-highlight-bg-color', settings.anchorHighlightBgColor);
-            updateColorInputs('anchor-bg', settings.anchorHighlightBgColor);
+        // Pin Highlight Colors
+        if (settings.pinHighlightBgColor) {
+            document.documentElement.style.setProperty('--otk-pin-highlight-bg-color', settings.pinHighlightBgColor);
+            updateColorInputs('pin-bg', settings.pinHighlightBgColor);
         }
-        if (settings.anchorHighlightBorderColor) {
-            document.documentElement.style.setProperty('--otk-anchor-highlight-border-color', settings.anchorHighlightBorderColor);
-            updateColorInputs('anchor-border', settings.anchorHighlightBorderColor);
+        if (settings.pinHighlightBorderColor) {
+            document.documentElement.style.setProperty('--otk-pin-highlight-border-color', settings.pinHighlightBorderColor);
+            updateColorInputs('pin-border', settings.pinHighlightBorderColor);
         }
 
         // '+' Icon Background
@@ -8099,8 +7992,8 @@ function applyThemeSettings(options = {}) {
         }));
 
         // Anchor Highlight Colors
-        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Anchor Highlight Background:", storageKey: 'anchorHighlightBgColor', cssVariable: '--otk-anchor-highlight-bg-color', defaultValue: '#4a4a3a', inputType: 'color', idSuffix: 'anchor-bg', requiresRerender: true }));
-        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Anchor Highlight Border:", storageKey: 'anchorHighlightBorderColor', cssVariable: '--otk-anchor-highlight-border-color', defaultValue: '#FFD700', inputType: 'color', idSuffix: 'anchor-border', requiresRerender: true }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Pin Highlight Background:", storageKey: 'pinHighlightBgColor', cssVariable: '--otk-pin-highlight-bg-color', defaultValue: '#4a4a3a', inputType: 'color', idSuffix: 'pin-bg', requiresRerender: true }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Pin Highlight Border:", storageKey: 'pinHighlightBorderColor', cssVariable: '--otk-pin-highlight-border-color', defaultValue: '#FFD700', inputType: 'color', idSuffix: 'pin-border', requiresRerender: true }));
 
         // '+' Icon Background
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "'+' Icon Background:", storageKey: 'plusIconBgColor', cssVariable: '--otk-plus-icon-bg-color', defaultValue: '#d9d9d9', inputType: 'color', idSuffix: 'plus-icon-bg-color', requiresRerender: false }));
@@ -8318,6 +8211,17 @@ function applyThemeSettings(options = {}) {
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Content Font:", storageKey: 'msgDepthEvenTextColor', cssVariable: '--otk-msg-depth-even-text-color', defaultValue: '#333333', inputType: 'color', idSuffix: 'msg-depth-even-text', requiresRerender: true }));
         themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Header Font:", storageKey: 'msgDepthEvenHeaderTextColor', cssVariable: '--otk-msg-depth-even-header-text-color', defaultValue: '#555555', inputType: 'color', idSuffix: 'msg-depth-even-header-text', requiresRerender: true }));
         themeOptionsContainer.appendChild(createCheckboxOptionRow({ labelText: "Show Media Filename:", storageKey: 'showEvenMessageFilename', defaultValue: false, idSuffix: 'show-even-filename', requiresRerender: true }));
+
+        // --- Message Icons Section ---
+        const messageIconsHeading = createSectionHeading('Message Icons');
+        messageIconsHeading.style.marginTop = "22px";
+        messageIconsHeading.style.marginBottom = "18px";
+        themeOptionsContainer.appendChild(messageIconsHeading);
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Block Icon (Odd):", storageKey: 'blockIconColorOdd', cssVariable: '--otk-block-icon-color-odd', defaultValue: '#999999', inputType: 'color', idSuffix: 'block-icon-odd' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Block Icon (Even):", storageKey: 'blockIconColorEven', cssVariable: '--otk-block-icon-color-even', defaultValue: '#999999', inputType: 'color', idSuffix: 'block-icon-even' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Pin Icon (Odd):", storageKey: 'pinIconColorOdd', cssVariable: '--otk-pin-icon-color-odd', defaultValue: '#666666', inputType: 'color', idSuffix: 'pin-icon-odd' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Pin Icon (Even):", storageKey: 'pinIconColorEven', cssVariable: '--otk-pin-icon-color-even', defaultValue: '#666666', inputType: 'color', idSuffix: 'pin-icon-even' }));
+        themeOptionsContainer.appendChild(createThemeOptionRow({ labelText: "Pin Icon (Active):", storageKey: 'pinIconColorActive', cssVariable: '--otk-pin-icon-color-active', defaultValue: '#ff0000', inputType: 'color', idSuffix: 'pin-icon-active' }));
 
         // --- Options Panel Section ---
         const optionsPanelSectionHeading = createSectionHeading('Options Panel');
@@ -8640,9 +8544,9 @@ function applyThemeSettings(options = {}) {
                 { storageKey: 'newMessagesFontSize', cssVariable: '--otk-new-messages-font-size', defaultValue: '16px', inputType: 'number', unit: 'px', min: 8, max: 24, idSuffix: 'new-msg-font-size', requiresRerender: false },
                 { storageKey: 'blockedContentFontColor', cssVariable: '--otk-blocked-content-font-color', defaultValue: '#e6e6e6', inputType: 'color', idSuffix: 'blocked-content-font' },
 
-                // Anchor Highlight Colors
-                { storageKey: 'anchorHighlightBgColor', cssVariable: '--otk-anchor-highlight-bg-color', defaultValue: '#ffd1a4', inputType: 'color', idSuffix: 'anchor-bg' },
-                { storageKey: 'anchorHighlightBorderColor', cssVariable: '--otk-anchor-highlight-border-color', defaultValue: '#000000', inputType: 'color', idSuffix: 'anchor-border' },
+                // Pin Highlight Colors
+                { storageKey: 'pinHighlightBgColor', cssVariable: '--otk-pin-highlight-bg-color', defaultValue: '#ffd1a4', inputType: 'color', idSuffix: 'pin-bg' },
+                { storageKey: 'pinHighlightBorderColor', cssVariable: '--otk-pin-highlight-border-color', defaultValue: '#000000', inputType: 'color', idSuffix: 'pin-border' },
 
                 // '+' Icon Background
                 { storageKey: 'plusIconBgColor', cssVariable: '--otk-plus-icon-bg-color', defaultValue: '#d9d9d9', inputType: 'color', idSuffix: 'plus-icon-bg-color' },
@@ -8682,7 +8586,14 @@ function applyThemeSettings(options = {}) {
                 { storageKey: 'qrHeaderBgColor', cssVariable: '--otk-qr-header-bg-color', defaultValue: '#444444', inputType: 'color', idSuffix: 'qr-header-bg' },
                 { storageKey: 'qrHeaderTextColor', cssVariable: '--otk-qr-header-text-color', defaultValue: '#ffffff', inputType: 'color', idSuffix: 'qr-header-text' },
                 { storageKey: 'qrTextareaBgColor', cssVariable: '--otk-qr-textarea-bg-color', defaultValue: '#222222', inputType: 'color', idSuffix: 'qr-textarea-bg' },
-                { storageKey: 'qrTextareaTextColor', cssVariable: '--otk-qr-textarea-text-color', defaultValue: '#eeeeee', inputType: 'color', idSuffix: 'qr-textarea-text' }
+                { storageKey: 'qrTextareaTextColor', cssVariable: '--otk-qr-textarea-text-color', defaultValue: '#eeeeee', inputType: 'color', idSuffix: 'qr-textarea-text' },
+
+                // Message Header Icon Colors
+                { storageKey: 'blockIconColorOdd', cssVariable: '--otk-block-icon-color-odd', defaultValue: '#999999', inputType: 'color', idSuffix: 'block-icon-odd' },
+                { storageKey: 'blockIconColorEven', cssVariable: '--otk-block-icon-color-even', defaultValue: '#999999', inputType: 'color', idSuffix: 'block-icon-even' },
+                { storageKey: 'pinIconColorOdd', cssVariable: '--otk-pin-icon-color-odd', defaultValue: '#666666', inputType: 'color', idSuffix: 'pin-icon-odd' },
+                { storageKey: 'pinIconColorEven', cssVariable: '--otk-pin-icon-color-even', defaultValue: '#666666', inputType: 'color', idSuffix: 'pin-icon-even' },
+                { storageKey: 'pinIconColorActive', cssVariable: '--otk-pin-icon-color-active', defaultValue: '#ff0000', inputType: 'color', idSuffix: 'pin-icon-active' }
             ];
         }
 
@@ -9636,8 +9547,8 @@ function setupClockOptionsWindow() {
                 /* Add more variables here as they are identified */
 
                 /* Anchor Highlight Colors */
-                --otk-anchor-highlight-bg-color: #ff8040;    /* Default: dark yellow/greenish */
-                --otk-anchor-highlight-border-color: #000000; /* Default: gold */
+                --otk-pin-highlight-bg-color: #ffd1a4;    /* Default: dark yellow/greenish */
+                --otk-pin-highlight-border-color: #000000; /* Default: gold */
 
                 /* Icon Colors */
                 --otk-plus-icon-bg-color: #d9d9d9;
@@ -9654,6 +9565,13 @@ function setupClockOptionsWindow() {
                 --otk-qr-header-text-color: #ffffff;
                 --otk-qr-textarea-bg-color: #222222;
                 --otk-qr-textarea-text-color: #eeeeee;
+
+                /* Message Header Icon Colors */
+                --otk-block-icon-color-odd: #999999;
+                --otk-block-icon-color-even: #999999;
+                --otk-pin-icon-color-odd: #666666;
+                --otk-pin-icon-color-even: #666666;
+                --otk-pin-icon-color-active: #ff0000;
             }
 
             /* Refined Chrome Scrollbar Styling for Overlay Effect */
@@ -9705,10 +9623,39 @@ function setupClockOptionsWindow() {
             #otk-clock:hover #otk-clock-search-icon {
                 display: inline-block;
             }
-            .${ANCHORED_MESSAGE_CLASS} {
-                background-color: var(--otk-anchor-highlight-bg-color) !important;
-                border: 1px solid var(--otk-anchor-highlight-border-color) !important;
+            .${PINNED_MESSAGE_CLASS} {
+                background-color: var(--otk-pin-highlight-bg-color) !important;
+                border: 1px solid var(--otk-pin-highlight-border-color) !important;
                 /* Add other styles if needed, e.g., box-shadow */
+            }
+
+            .otk-pin-icon {
+                visibility: hidden; /* Hidden by default, visibility is controlled by JS */
+                cursor: pointer;
+                margin-left: 8px; /* Space between icons */
+                vertical-align: middle;
+            width: 18px;
+            height: 18px;
+                transition: color 0.2s ease-in-out; /* Transition color now */
+            }
+
+            /* Block Icon Colors */
+            .otk-message-depth-odd .block-icon {
+                color: var(--otk-block-icon-color-odd);
+            }
+            .otk-message-depth-even .block-icon {
+                color: var(--otk-block-icon-color-even);
+            }
+
+            /* Pin Icon Colors */
+            .otk-message-depth-odd .otk-pin-icon {
+                color: var(--otk-pin-icon-color-odd);
+            }
+            .otk-message-depth-even .otk-pin-icon {
+                color: var(--otk-pin-icon-color-even);
+            }
+            .${PINNED_MESSAGE_CLASS} .otk-pin-icon {
+                color: var(--otk-pin-icon-color-active);
             }
                 .otk-youtube-embed-wrapper.otk-embed-inline {
                     /* max-width and margins are now controlled by inline styles in createYouTubeEmbedElement */
